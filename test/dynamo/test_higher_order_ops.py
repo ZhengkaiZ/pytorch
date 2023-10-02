@@ -262,21 +262,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor, L_z_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
-        l_z_ = L_z_
+        child = L_x_
+        child_2 = L_y_
+        child_3 = L_z_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, l_y_, l_z_);  wrap_body_0 = l_x_ = l_y_ = l_z_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child, child_2, child_3);  \
+wrap_body_0 = child = child_2 = child_3 = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_, l_z_):
-            sin = l_x_.sin();  l_x_ = None
-            cos = l_y_.cos();  l_y_ = None
+        def forward(self, child, child_2, child_3):
+            sin = child.sin();  child = None
+            cos = child_2.cos();  child_2 = None
             add = sin + cos;  sin = cos = None
-            sin_1 = l_z_.sin();  l_z_ = None
+            sin_1 = child_3.sin();  child_3 = None
             sub = add - sin_1;  add = sin_1 = None
             return (sub,)
 """,
@@ -302,16 +303,16 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child);  wrap_body_0 = child = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            view = l_x_.view(3);  l_x_ = None
+        def forward(self, child):
+            view = child.view(3);  child = None
             add = view + 0.5;  view = None
             return (add,)
 """,
@@ -322,18 +323,18 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
-        size = l_x_.size(0)
+        size = child.size(0)
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, size);  wrap_body_0 = l_x_ = size = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child, size);  wrap_body_0 = child = size = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, size):
-            view = l_x_.view(size);  l_x_ = size = None
+        def forward(self, child, size):
+            view = child.view(size);  child = size = None
             add = view + 0.5;  view = None
             return (add,)
 """,
@@ -1640,10 +1641,10 @@ def forward(self):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child);  wrap_body_0 = child = None
         a = wrap[0]
         b = wrap[1];  wrap = None
 
@@ -1651,10 +1652,10 @@ class GraphModule(torch.nn.Module):
         return (add,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            child = l_x_.sin()
-            child_1 = l_x_.cos();  l_x_ = None
-            return (child, child_1)
+        def forward(self, child):
+            child_1 = child.sin()
+            child_2 = child.cos();  child = None
+            return (child_1, child_2)
 """,
         )
 
@@ -1676,17 +1677,17 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, child);  wrap_body_0 = child = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            child = -l_x_;  l_x_ = None
-            return (child,)
+        def forward(self, child):
+            child_1 = -child;  child = None
+            return (child_1,)
 """,
         )
 
@@ -1850,6 +1851,42 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+    def test_autograd_function_multiple_return(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin(), x.cos()
+            @staticmethod
+            def backward(ctx, grad0, grad1):
+                x, = ctx.saved_tensors
+                return grad0 * x.cos() + grad1 * x.cos()
+
+        def fn(x):
+            return Foo.apply(x)
+
+        backend = EagerAndRecordGraphs()
+
+        x = torch.randn(5, requires_grad=True)
+        actual = fn(x)
+        expected = torch.compile(backend=backend, fullgraph=True)(fn)(x)
+        self.assertEqual(actual, expected)
+
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(normalize_gm(backend.graphs[0].print_readable(print_output=False)), """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        child = L_x_
+
+        function_ctx = torch.autograd.function.FunctionCtx()
+        trampoline_autograd_apply = torch__dynamo_variables_misc_trampoline_autograd_apply(child);  child = None
+        getitem_2 = trampoline_autograd_apply[0]
+        getitem_3 = trampoline_autograd_apply[1];  trampoline_autograd_apply = None
+        return (getitem_2, getitem_3)
+""")
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def run(self, result=None):
@@ -1891,19 +1928,19 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
+        def forward(self, child):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin();  l_x_ = None
+            sin = child.sin();  child = None
             sum_1 = sin.sum();  sin = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
@@ -1949,19 +1986,19 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
+        def forward(self, child):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin();  l_x_ = None
+            sin = child.sin();  child = None
             add = sin + 3;  sin = None
             sum_1 = add.sum();  add = None
 
@@ -2000,20 +2037,20 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
         l_y_ = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(child, l_y_);  grad_proxy = child = l_y_ = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
+        def forward(self, child, l_y_):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin();  l_x_ = None
+            sin = child.sin();  child = None
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
 
@@ -2049,19 +2086,19 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
+        def forward(self, child):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin();  l_x_ = None
+            sin = child.sin();  child = None
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
 
@@ -2094,24 +2131,24 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
         getitem = call[0]
         getitem_1 = call[1];  call = None
         contiguous = getitem.contiguous();  getitem = None
         return (contiguous, getitem_1)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
+        def forward(self, child):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin()
+            sin = child.sin()
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
-            cos = l_x_.cos();  l_x_ = None
+            cos = child.cos();  child = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
@@ -2141,25 +2178,25 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_x_
+        child_1 = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(child, child_1);  grad_proxy = child = child_1 = None
         getitem = call[0]
         getitem_1 = call[1];  call = None
         contiguous = getitem.contiguous();  getitem = None
         return (contiguous, getitem_1)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
+        def forward(self, child, child_1):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin()
-            add = sin + l_y_;  sin = l_y_ = None
+            sin = child.sin()
+            add = sin + child_1;  sin = child_1 = None
             sum_1 = add.sum();  add = None
-            cos = l_x_.cos();  l_x_ = None
+            cos = child.cos();  child = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
@@ -2200,12 +2237,12 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_x_
+        child_1 = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(child, child_1);  grad_proxy = child = child_1 = None
         getitem = call[0]
         getitem_1 = getitem[0]
         getitem_2 = getitem[1];  getitem = None
@@ -2215,13 +2252,13 @@ class GraphModule(torch.nn.Module):
         return (contiguous, contiguous_1, getitem_3)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
+        def forward(self, child, child_1):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin()
-            add = sin + l_y_;  sin = l_y_ = None
+            sin = child.sin()
+            add = sin + child_1;  sin = child_1 = None
             sum_1 = add.sum();  add = None
-            cos = l_x_.cos();  l_x_ = None
+            cos = child.cos();  child = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
@@ -2232,12 +2269,12 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_x_
+        child_1 = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(child, child_1);  grad_proxy = child = child_1 = None
         getitem = call[0]
         getitem_1 = getitem[0]
         getitem_2 = getitem[1];  getitem = None
@@ -2247,13 +2284,13 @@ class GraphModule(torch.nn.Module):
         return (contiguous, contiguous_1, getitem_3)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
+        def forward(self, child, child_1):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin()
-            add = sin + l_y_;  sin = l_y_ = None
+            sin = child.sin()
+            add = sin + child_1;  sin = child_1 = None
             sum_1 = add.sum();  add = None
-            cos = l_x_.cos();  l_x_ = None
+            cos = child.cos();  child = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
@@ -2281,31 +2318,31 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         grad_body_1 = self.grad_body_1
         grad_proxy = torch.func.grad(grad_body_1, 0, False);  grad_body_1 = None
-        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(child);  grad_proxy = child = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
+        def forward(self, child):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
             grad_body_0 = self.grad_body_0
             grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-            call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+            call = grad_proxy.__call__(child);  grad_proxy = child = None
             contiguous = call.contiguous();  call = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return contiguous
 
         class GraphModule(torch.nn.Module):
-            def forward(self, l_x_):
+            def forward(self, child):
                 _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-                sin = l_x_.sin();  l_x_ = None
+                sin = child.sin();  child = None
                 sum_1 = sin.sum();  sin = None
 
                 _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
@@ -2354,6 +2391,9 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    # Pushed the error further.
+    # Ref: https://github.com/pytorch/pytorch/pull/107618
+    @unittest.expectedFailure
     def test_grad_pytree(self):
         counters.clear()
 
@@ -2401,19 +2441,19 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, 3.0);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(child, 3.0);  grad_proxy = child = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, const):
+        def forward(self, child, const):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
-            sin = l_x_.sin();  l_x_ = None
+            sin = child.sin();  child = None
             sum_1 = sin.sum();  sin = None
             add = sum_1 + 3.0;  sum_1 = None
 
@@ -2488,16 +2528,16 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_1):
+            sum_1 = child_1.sum(0)
+            sum_2 = child_1.sum(1);  child_1 = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             return add
 """,
@@ -2526,16 +2566,16 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_1):
+            sum_1 = child_1.sum(0)
+            sum_2 = child_1.sum(1);  child_1 = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + 3;  add = None
             return add_1
@@ -2566,16 +2606,16 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child, l_y_);  vmap_proxy = child = l_y_ = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select, l_y_):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_1, l_y_):
+            sum_1 = child_1.sum(0)
+            sum_2 = child_1.sum(1);  child_1 = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
             add_1 = add + l_y_;  add = l_y_ = None
             return add_1
@@ -2607,19 +2647,19 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
-        select_1 = child_1.select(1, 0)
+        child_2 = child.select(0, 0)
+        child_3 = child_1.select(1, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select, select_1):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_2, child_3):
+            sum_1 = child_2.sum(0)
+            sum_2 = child_2.sum(1);  child_2 = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
-            add_1 = add + select_1;  add = select_1 = None
+            add_1 = add + child_3;  add = child_3 = None
             return add_1
 """,
         )
@@ -2651,19 +2691,19 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
-        select_1 = child_1.select(1, 0)
+        child_2 = child.select(0, 0)
+        child_3 = child_1.select(1, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select, select_1):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_2, child_3):
+            sum_1 = child_2.sum(0)
+            sum_2 = child_2.sum(1);  child_2 = None
             add = sum_1 + sum_2;  sum_1 = sum_2 = None
-            add_1 = add + select_1;  add = select_1 = None
+            add_1 = add + child_3;  add = child_3 = None
             return add_1
 """,
         )
@@ -2692,28 +2732,28 @@ class GraphModule(torch.nn.Module):
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
         _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
-        select_1 = child_1.select(0, 0)
+        child_2 = child.select(0, 0)
+        child_3 = child_1.select(0, 0)
         vmap_body_1 = self.vmap_body_1
         vmap_proxy = torch.func.vmap(vmap_body_1, (0, 0), 0, 'error');  vmap_body_1 = None
         call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select, select_1):
-            child = select
-            child_1 = select_1
+        def forward(self, child_2, child_3):
+            child = child_2
+            child_4 = child_3
 
-            select_2 = child.select(1, 0)
-            select_3 = child_1.select(1, 0)
+            child_5 = child.select(1, 0)
+            child_6 = child_4.select(1, 0)
             vmap_body_0 = self.vmap_body_0
             vmap_proxy = torch.func.vmap(vmap_body_0, (1, 1), 0, 'error');  vmap_body_0 = None
-            call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
+            call = vmap_proxy.__call__(child, child_4);  vmap_proxy = child = child_4 = None
             return call
 
         class GraphModule(torch.nn.Module):
-            def forward(self, select_2, select_3):
-                add = select_2 + select_3;  select_2 = select_3 = None
+            def forward(self, child_5, child_6):
+                add = child_5 + child_6;  child_5 = child_6 = None
                 return add
 """,
         )
@@ -2743,25 +2783,25 @@ class GraphModule(torch.nn.Module):
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
         _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_1 = self.vmap_body_1
         vmap_proxy = torch.func.vmap(vmap_body_1, (0, None), 0, 'error');  vmap_body_1 = None
         call = vmap_proxy.__call__(child, l_x_);  vmap_proxy = child = l_x_ = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select, l_x_):
-            child = select
+        def forward(self, child_1, l_x_):
+            child = child_1
 
-            select_1 = child.select(0, 0)
+            child_2 = child.select(0, 0)
             vmap_body_0 = self.vmap_body_0
             vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
             call = vmap_proxy.__call__(child, l_x_);  vmap_proxy = child = l_x_ = None
             return call
 
         class GraphModule(torch.nn.Module):
-            def forward(self, select_1, l_x_):
-                mul = l_x_ * select_1;  l_x_ = select_1 = None
+            def forward(self, child_2, l_x_):
+                mul = l_x_ * child_2;  l_x_ = child_2 = None
                 return mul
 """,
         )
@@ -2788,7 +2828,7 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child);  vmap_proxy = child = None
@@ -2797,9 +2837,9 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_1):
+            sum_1 = child_1.sum(0)
+            sum_2 = child_1.sum(1);  child_1 = None
             return (sum_1, sum_2)
 """,
         )
@@ -2826,7 +2866,7 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child);  vmap_proxy = child = None
@@ -2835,9 +2875,9 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_1):
+            sum_1 = child_1.sum(0)
+            sum_2 = child_1.sum(1);  child_1 = None
             return (sum_1, sum_2)
 """,
         )
@@ -2865,7 +2905,7 @@ class GraphModule(torch.nn.Module):
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = child.select(0, 0)
+        child_1 = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
         call = vmap_proxy.__call__(child);  vmap_proxy = child = None
@@ -2874,9 +2914,9 @@ class GraphModule(torch.nn.Module):
         return (getitem, getitem_1)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, select):
-            sum_1 = select.sum(0)
-            sum_2 = select.sum(1);  select = None
+        def forward(self, child_1):
+            sum_1 = child_1.sum(0)
+            sum_2 = child_1.sum(1);  child_1 = None
             return (sum_1, sum_2)
 """,
         )
@@ -2898,6 +2938,9 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    # Pushed the error further.
+    # Ref: https://github.com/pytorch/pytorch/pull/107618
+    @unittest.expectedFailure
     def test_vmap_pytree_inputs(self):
         counters.clear()
         x = torch.ones(2, 3)
