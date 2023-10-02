@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_CUDA
+
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
@@ -7,7 +9,7 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
-#define AOTI_RUNTIME_CUDA_CHECK(EXPR)                      \
+#define AOTI_RUNTIME_DEVICE_CHECK(EXPR)                    \
   do {                                                     \
     const cudaError_t code = EXPR;                         \
     const char* msg = cudaGetErrorString(code);            \
@@ -16,3 +18,13 @@
           std::string("CUDA error: ") + std::string(msg)); \
     }                                                      \
   } while (0)
+
+namespace torch {
+namespace aot_inductor {
+
+using DeviceStreamType = cudaStream_t;
+
+} // namespace aot_inductor
+} // namespace torch
+
+#endif // USE_CUDA

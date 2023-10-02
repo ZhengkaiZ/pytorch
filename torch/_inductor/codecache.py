@@ -789,10 +789,6 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode:
-        # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
-        cuda = True
-
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -861,6 +857,8 @@ def get_include_and_linking_paths(
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.dirname(cpp_prefix_path())]
         lpaths = []
         if sys.platform == "darwin":
             # only Apple builtin compilers (Apple Clang++) require openmp
