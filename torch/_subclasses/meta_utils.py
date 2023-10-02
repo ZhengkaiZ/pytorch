@@ -433,6 +433,25 @@ class MetaConverter:
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
 
+                        extra_context = None
+                        if t.is_nested:
+                            # Avoid circular import
+                            from torch._dynamo.source import (
+                                TensorProperty,
+                                TensorPropertySource,
+                            )
+
+                            sym_ragged_size = shape_env.create_symintnode(
+                                shape_env.create_symbol(
+                                    t._size[1],
+                                    TensorPropertySource(
+                                        source, TensorProperty.SIZE, 1
+                                    ),
+                                ),
+                                hint=t._size[1],
+                            )
+                            extra_context = (sym_ragged_size,)
+
                         r = transform_subclass(
                             t,
                             lambda attr, inner_t: callback(
@@ -441,6 +460,7 @@ class MetaConverter:
                                     AttrSource(source, attr),
                                 )
                             ),
+                            extra_context=extra_context,
                         )
                     else:
                         r = callback(
@@ -468,10 +488,12 @@ class MetaConverter:
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
-                    if (
-                        swr not in self.storage_memo
-                        and r.stride() == strides
-                        and r.storage_offset() == storage_offset
+                    if swr not in self.storage_memo and (
+                        r.is_nested
+                        or (
+                            r.stride() == strides
+                            and r.storage_offset() == storage_offset
+                        )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
                         self.storage_memo[swr] = r.untyped_storage()
@@ -562,7 +584,6 @@ class MetaConverter:
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     t.device.type in ("lazy"),
