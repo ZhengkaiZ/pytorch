@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
                                                   IS_MACOS, TEST_CUDA)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
 
@@ -108,6 +109,11 @@ JOIN_TIMEOUT = 60.0  # seconds
 
 
 supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
+
+
+# Identity function; defined globally here for pickle purposes.
+def _identity(x):
+    return x
 
 
 @unittest.skipIf(
@@ -2266,6 +2272,22 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
+class TestDataLoaderDeviceType(TestCase):
+    def test_nested_tensor_multiprocessing(self, device):
+        dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(100)]
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=4,
+            collate_fn=_identity,
+            multiprocessing_context=('spawn' if 'cuda' in device else 'fork'),
+        )
+
+        for i, batch in enumerate(loader):
+            self.assertEqual(batch[0], dataset[i])
+
+
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
     Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
@@ -2771,6 +2793,9 @@ class TestConvAfterFork(TestCase):
         loader = DataLoader(ConvDataset(), num_workers=1)
         for x in loader:
             self.assertEqual(x.shape, (1, 1, 1, 23999))
+
+
+instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
 
 if __name__ == '__main__':
